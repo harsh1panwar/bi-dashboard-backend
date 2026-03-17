@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BI Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#080c0a;--bg2:#0d1410;--bg3:#111a14;--panel:#0f1a12;--border:#1a2e1e;
+    --accent:#00ff88;--accent2:#00cc6a;--accent-dim:rgba(0,255,136,0.08);
+    --accent-glow:rgba(0,255,136,0.15);--text:#e8f5ec;--text2:#7a9e84;
+    --text3:#4a6b52;--error:#ff4466;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;position:relative;z-index:10}
+  .logo{display:flex;align-items:center;gap:10px}
+  .logo-icon{width:32px;height:32px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:14px;font-weight:700;color:var(--bg);box-shadow:0 0 20px var(--accent-glow)}
+  .logo-text{font-family:'Space Mono',monospace;font-size:15px;font-weight:700;color:var(--accent);letter-spacing:1px}
+  .header-right{display:flex;align-items:center;gap:16px}
+  .header-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3);font-family:'Space Mono',monospace}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--text3);animation:pulse 2s infinite}
+  .status-dot.active{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  .main{display:flex;flex:1;overflow:hidden}
+
+  /* SIDEBAR */
+  .sidebar{width:340px;min-width:340px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+  .sidebar-section{padding:20px;border-bottom:1px solid var(--border)}
+  .section-label{font-family:'Space Mono',monospace;font-size:10px;font-weight:700;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-bottom:12px}
+  .upload-zone{border:1.5px dashed var(--border);border-radius:10px;padding:20px;text-align:center;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden}
+  .upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:var(--accent-dim)}
+  .upload-zone input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+  .upload-icon{font-size:24px;margin-bottom:8px;display:block}
+  .upload-text{font-size:13px;color:var(--text2);line-height:1.5}
+  .upload-text span{color:var(--accent);font-weight:600}
+  .upload-success{display:none;align-items:center;gap:8px;padding:10px 14px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:8px;font-size:12px;color:var(--accent);font-family:'Space Mono',monospace}
+  .columns-wrap{display:flex;flex-wrap:wrap;gap:6px;max-height:80px;overflow-y:auto}
+  .col-badge{padding:3px 9px;background:var(--accent-dim);border:1px solid rgba(0,255,136,0.2);border-radius:4px;font-size:11px;color:var(--accent);font-family:'Space Mono',monospace;white-space:nowrap}
+  .empty-state-small{font-size:12px;color:var(--text3);font-style:italic}
+
+  /* CHAT */
+  .chat-history{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+  .chat-msg{display:flex;flex-direction:column;gap:4px;animation:slideIn 0.3s ease}
+  @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+  /* User bubble — clickable to reload chart */
+  .chat-msg.user .bubble{
+    background:var(--accent-dim);border:1px solid rgba(0,255,136,0.2);
+    border-radius:10px 10px 2px 10px;padding:10px 13px;font-size:13px;
+    color:var(--text);align-self:flex-end;max-width:90%;
+    cursor:pointer;transition:all 0.18s;position:relative;
+  }
+  .chat-msg.user .bubble:hover{
+    background:rgba(0,255,136,0.14);border-color:var(--accent);
+    box-shadow:0 0 12px var(--accent-glow);
+  }
+  .chat-msg.user .bubble:hover::after{
+    content:'↩ reload chart';
+    position:absolute;bottom:-20px;right:0;
+    font-size:9px;color:var(--accent);font-family:'Space Mono',monospace;
+    white-space:nowrap;opacity:0.8;
+  }
+  .chat-msg.user .bubble.active-chart{
+    border-color:var(--accent);
+    box-shadow:0 0 0 2px var(--accent);
+  }
+  .chat-msg.assistant .bubble{background:var(--bg3);border:1px solid var(--border);border-radius:2px 10px 10px 10px;padding:10px 13px;font-size:12px;color:var(--text2);max-width:95%}
+  .chat-msg .meta{font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;padding:0 4px}
+  .chat-msg.user .meta{text-align:right}
+  .sql-toggle{font-size:10px;color:var(--accent2);cursor:pointer;font-family:'Space Mono',monospace;padding:4px 0;display:block}
+  .sql-block{display:none;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:'Space Mono',monospace;font-size:10px;color:var(--accent2);word-break:break-all;margin-top:4px;line-height:1.6}
+  .chat-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--text3);font-size:12px;text-align:center;padding:20px}
+  .chat-empty-icon{font-size:28px;opacity:0.4}
+
+  /* INPUT */
+  .input-area{padding:16px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+  .input-row{display:flex;gap:8px;align-items:flex-end}
+  .prompt-input{flex:1;background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;resize:none;outline:none;transition:border-color 0.2s;min-height:42px;max-height:100px}
+  .prompt-input:focus{border-color:var(--accent)}
+  .prompt-input::placeholder{color:var(--text3)}
+  .send-btn{width:42px;height:42px;background:var(--accent);border:none;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;flex-shrink:0;color:var(--bg);font-size:16px}
+  .send-btn:hover{background:var(--accent2);transform:scale(1.05)}
+  .send-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+  .input-hint{font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;text-align:center}
+
+  /* CHART PANEL */
+  .chart-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+  .chart-header{padding:14px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:12px}
+  .chart-title{font-family:'Space Mono',monospace;font-size:13px;color:var(--text);font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chart-controls{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  .chart-meta{font-size:11px;color:var(--text3);font-family:'Space Mono',monospace}
+
+  /* Chart type toggle buttons */
+  .type-toggles{display:none;align-items:center;gap:4px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:3px}
+  .type-toggles.show{display:flex}
+  .type-btn{padding:4px 10px;border:none;background:transparent;color:var(--text3);font-family:'Space Mono',monospace;font-size:10px;border-radius:5px;cursor:pointer;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.5px}
+  .type-btn:hover{color:var(--text);background:var(--accent-dim)}
+  .type-btn.active{background:var(--accent);color:var(--bg);font-weight:700}
+
+  /* Download button */
+  .download-btn{display:none;padding:6px 12px;background:var(--accent-dim);border:1px solid rgba(0,255,136,0.25);color:var(--accent);font-family:'Space Mono',monospace;font-size:10px;border-radius:7px;cursor:pointer;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.5px}
+  .download-btn.show{display:inline-flex;align-items:center;gap:5px}
+  .download-btn:hover{background:var(--accent);color:var(--bg)}
+
+  .chart-body{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden;position:relative}
+  .welcome{display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;max-width:420px}
+  .welcome-icon{width:80px;height:80px;border-radius:20px;background:var(--accent-dim);border:1px solid rgba(0,255,136,0.2);display:flex;align-items:center;justify-content:center;font-size:36px}
+  .welcome h2{font-family:'Space Mono',monospace;font-size:20px;color:var(--text);font-weight:700}
+  .welcome p{font-size:14px;color:var(--text2);line-height:1.7}
+  .welcome-steps{display:flex;gap:12px;margin-top:8px}
+  .step{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 18px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--text2);width:110px}
+  .step-num{width:24px;height:24px;border-radius:50%;background:var(--accent-dim);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);font-weight:700}
+  .canvas-wrap{width:100%;height:100%;display:none;position:relative}
+  .canvas-wrap canvas{max-width:100%;max-height:100%}
+  .loading-overlay{display:none;position:absolute;inset:0;background:rgba(8,12,10,0.85);align-items:center;justify-content:center;flex-direction:column;gap:16px;z-index:20;backdrop-filter:blur(4px)}
+  .loading-overlay.show{display:flex}
+  .loader{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading-text{font-family:'Space Mono',monospace;font-size:13px;color:var(--accent);animation:blink 1.2s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+  .loading-sub{font-size:11px;color:var(--text3);font-family:'Space Mono',monospace}
+  .toast{position:fixed;bottom:24px;right:24px;padding:12px 18px;background:#1a0810;border:1px solid var(--error);border-radius:10px;color:var(--error);font-size:13px;font-family:'Space Mono',monospace;z-index:100;display:none;max-width:360px;line-height:1.5}
+  ::-webkit-scrollbar{width:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,255,136,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,136,0.02) 1px,transparent 1px);background-size:32px 32px;pointer-events:none;z-index:0}
+  header,.main{position:relative;z-index:1}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">BI</div>
+    <span class="logo-text">DASHBOARD</span>
+  </div>
+  <div class="header-right">
+    <div class="header-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">NO DATA</span>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sidebar-section">
+      <div class="section-label">Data Source</div>
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept=".csv">
+        <span class="upload-icon">📂</span>
+        <div class="upload-text">Drop CSV here or <span>browse</span></div>
+      </div>
+      <div class="upload-success" id="uploadSuccess">
+        <span>✅</span><span id="uploadFileName">file.csv loaded</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Columns Detected</div>
+      <div class="columns-wrap" id="columnsWrap">
+        <span class="empty-state-small">Upload a CSV to see columns</span>
+      </div>
+    </div>
+
+    <div class="chat-history" id="chatHistory">
+      <div class="chat-empty" id="chatEmpty">
+        <div class="chat-empty-icon">💬</div>
+        <div>Your conversation will appear here</div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-row">
+        <textarea class="prompt-input" id="promptInput"
+          placeholder="Ask anything about your data..."
+          rows="1" disabled></textarea>
+        <button class="send-btn" id="sendBtn" disabled>➤</button>
+      </div>
+      <div class="input-hint">ENTER to send • SHIFT+ENTER for new line • click old prompt to reload</div>
+    </div>
+
+  </div>
+
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div class="chart-title" id="chartTitle">Waiting for query...</div>
+      <div class="chart-controls">
+        <span class="chart-meta" id="chartMeta"></span>
+
+        <!-- Chart type toggle -->
+        <div class="type-toggles" id="typeToggles">
+          <button class="type-btn" data-type="bar">Bar</button>
+          <button class="type-btn" data-type="line">Line</button>
+          <button class="type-btn" data-type="pie">Pie</button>
+          <button class="type-btn" data-type="scatter">Scatter</button>
+        </div>
+
+        <!-- Download button -->
+        <button class="download-btn" id="downloadBtn">
+          ↓ PNG
+        </button>
+      </div>
+    </div>
+
+    <div class="chart-body">
+      <div class="welcome" id="welcomeScreen">
+        <div class="welcome-icon">📊</div>
+        <h2>Instant BI Dashboard</h2>
+        <p>Upload your CSV and ask questions in plain English. Get interactive charts instantly.</p>
+        <div class="welcome-steps">
+          <div class="step"><div class="step-num">1</div>Upload CSV</div>
+          <div class="step"><div class="step-num">2</div>Ask a question</div>
+          <div class="step"><div class="step-num">3</div>See chart</div>
+        </div>
+      </div>
+
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="myChart"></canvas>
+      </div>
+
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="loader"></div>
+        <div class="loading-text" id="loadingText">GENERATING SQL...</div>
+        <div class="loading-sub">Talking to AI • Running query</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'http://localhost:8000';
+
+// State
+let sessionId    = null;
+let lastSQL      = null;
+let chartInstance= null;
+let currentData  = null;   // {rows, type, prompt} — for re-render on type toggle
+let activeUserBubble = null; // currently highlighted user bubble
+
+// DOM
+const fileInput      = document.getElementById('fileInput');
+const uploadZone     = document.getElementById('uploadZone');
+const uploadSuccess  = document.getElementById('uploadSuccess');
+const uploadFileName = document.getElementById('uploadFileName');
+const columnsWrap    = document.getElementById('columnsWrap');
+const chatHistory    = document.getElementById('chatHistory');
+const chatEmpty      = document.getElementById('chatEmpty');
+const promptInput    = document.getElementById('promptInput');
+const sendBtn        = document.getElementById('sendBtn');
+const chartTitle     = document.getElementById('chartTitle');
+const chartMeta      = document.getElementById('chartMeta');
+const welcomeScreen  = document.getElementById('welcomeScreen');
+const canvasWrap     = document.getElementById('canvasWrap');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingText    = document.getElementById('loadingText');
+const statusDot      = document.getElementById('statusDot');
+const statusText     = document.getElementById('statusText');
+const toast          = document.getElementById('toast');
+const typeToggles    = document.getElementById('typeToggles');
+const downloadBtn    = document.getElementById('downloadBtn');
+
+// ── UPLOAD ──
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+async function handleFile(file) {
+  if (!file.name.endsWith('.csv')) { showToast('Only CSV files are supported'); return; }
+  setLoading(true, 'PARSING CSV...');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res  = await fetch(`${API}/api/upload`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    sessionId = data.session_id;
+    lastSQL   = null;
+    uploadZone.style.display   = 'none';
+    uploadSuccess.style.display = 'flex';
+    uploadFileName.textContent  = file.name + ' loaded';
+    columnsWrap.innerHTML = '';
+    data.columns.forEach(col => {
+      const b = document.createElement('span');
+      b.className   = 'col-badge';
+      b.textContent = col;
+      columnsWrap.appendChild(b);
+    });
+    promptInput.disabled = false;
+    sendBtn.disabled     = false;
+    promptInput.focus();
+    setStatus(true, `${data.columns.length} COLS READY`);
+    chartTitle.textContent = 'Ready — ask your first question';
+  } catch (err) {
+    showToast(err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── SEND PROMPT ──
+promptInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
+});
+sendBtn.addEventListener('click', sendPrompt);
+
+async function sendPrompt() {
+  const prompt = promptInput.value.trim();
+  if (!prompt || !sessionId) return;
+  promptInput.value = '';
+  const userBubble = addChatMsg('user', prompt, null, null);
+  setLoading(true, lastSQL ? 'REFINING QUERY...' : 'GENERATING SQL...');
+  sendBtn.disabled = true;
+  try {
+    let res;
+    if (lastSQL) {
+      res = await fetch(`${API}/api/followup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, previous_query: lastSQL, followup_prompt: prompt })
+      });
+    } else {
+      res = await fetch(`${API}/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, prompt })
+      });
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Query failed');
+
+    lastSQL = data.query_used;
+
+    // Save result into the user bubble element for history reload
+    userBubble._chartData = { rows: data.data, type: data.chart_type, prompt, sql: data.query_used };
+
+    renderChart(data.chart_type, data.data, prompt);
+    setActiveBubble(userBubble);
+    addChatMsg('assistant', `Chart ready — ${data.data.length} rows • ${data.chart_type} chart`, data.query_used, null);
+    setStatus(true, `${data.data.length} ROWS`);
+  } catch (err) {
+    showToast(err.message);
+    addChatMsg('assistant', '⚠ ' + err.message, null, null);
+  } finally {
+    setLoading(false);
+    sendBtn.disabled = false;
+    promptInput.focus();
+  }
+}
+
+// ── RENDER CHART ──
+const COLORS = ['#00ff88','#00ccff','#ff6b6b','#ffaa00','#cc88ff','#ff88cc','#88ffcc','#ffcc88'];
+
+function renderChart(type, rows, prompt) {
+  if (!rows || rows.length === 0) { showToast('Query returned no data'); return; }
+  const keys = Object.keys(rows[0]);
+  if (keys.length < 2) { showToast('Not enough columns to chart — try rephrasing'); return; }
+
+  const labelKey  = keys[0];
+  const valueKeys = keys.slice(1);
+
+  // Smart type override
+  const isTime = /year|month|date|time/i.test(labelKey);
+  if (isTime && type !== 'scatter') type = 'line';
+  if (rows.length <= 6 && valueKeys.length === 1 && !isTime) type = 'pie';
+  if (valueKeys.length > 2) type = 'bar';
+
+  // Save current data for type-toggle re-render
+  currentData = { rows, type, prompt };
+
+  welcomeScreen.style.display = 'none';
+  canvasWrap.style.display    = 'block';
+  chartTitle.textContent = prompt.length > 55 ? prompt.slice(0, 55) + '…' : prompt;
+  chartMeta.textContent  = `${rows.length} rows`;
+
+  // Show controls
+  typeToggles.classList.add('show');
+  downloadBtn.classList.add('show');
+  updateTypeButtons(type);
+
+  // Destroy + recreate canvas
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  const old = document.getElementById('myChart');
+  const nc  = document.createElement('canvas');
+  nc.id = 'myChart';
+  old.replaceWith(nc);
+  const ctx = nc.getContext('2d');
+  const labels = rows.map(r => String(r[labelKey]).trim());
+  let config;
+
+  if (type === 'pie') {
+    config = { type: 'pie', data: { labels, datasets: [{
+      data: rows.map(r => Number(r[valueKeys[0]]) || 0),
+      backgroundColor: rows.map((_, i) => COLORS[i % COLORS.length]),
+      borderColor: '#0d1410', borderWidth: 2, hoverOffset: 12
+    }]}};
+  } else if (type === 'scatter') {
+    config = { type: 'scatter', data: { datasets: [{
+      label: valueKeys[1] || valueKeys[0],
+      data: rows.map(r => ({ x: Number(r[valueKeys[0]]) || 0, y: Number(r[valueKeys[1]] || r[valueKeys[0]]) || 0 })),
+      backgroundColor: COLORS[0] + 'aa', borderColor: COLORS[0], pointRadius: 5, pointHoverRadius: 8
+    }]}};
+  } else {
+    config = { type: type === 'line' ? 'line' : 'bar', data: { labels, datasets: valueKeys.map((k, i) => ({
+      label: k,
+      data: rows.map(r => { const v = r[k]; return (v === null || v === undefined || v === '') ? null : Number(v); }),
+      backgroundColor: type === 'line' ? 'transparent' : COLORS[i % COLORS.length] + 'cc',
+      borderColor: COLORS[i % COLORS.length],
+      borderWidth: type === 'line' ? 2.5 : 0,
+      borderRadius: type === 'bar' ? 6 : 0,
+      fill: type === 'line' ? { target: 'origin', above: COLORS[i % COLORS.length] + '15' } : false,
+      tension: 0.4,
+      pointBackgroundColor: COLORS[i % COLORS.length],
+      pointRadius: type === 'line' ? 4 : 0,
+      pointHoverRadius: 7, spanGaps: true
+    }))}};
+  }
+
+  config.options = {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 450, easing: 'easeInOutQuart' },
+    plugins: {
+      legend: { labels: { color: '#7a9e84', font: { family: 'DM Sans', size: 12 }, boxWidth: 12, padding: 16 }},
+      tooltip: {
+        backgroundColor: '#0d1410', borderColor: '#1a2e1e', borderWidth: 1,
+        titleColor: '#00ff88', bodyColor: '#e8f5ec', padding: 12,
+        titleFont: { family: 'Space Mono', size: 11 }, bodyFont: { family: 'DM Sans', size: 13 },
+        callbacks: { label: function(c) {
+          const raw = c.raw;
+          const val = (raw !== null && typeof raw === 'object') ? raw.y : raw;
+          const fmt = (val !== null && val !== undefined)
+            ? Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A';
+          return ` ${c.dataset.label || ''}: ${fmt}`;
+        }}
+      }
+    },
+    scales: type === 'pie' ? {} : {
+      x: { ticks: { color: '#4a6b52', font: { family: 'DM Sans', size: 11 }, maxRotation: 45, maxTicksLimit: 20 }, grid: { color: 'rgba(26,46,30,0.4)' }},
+      y: { ticks: { color: '#4a6b52', font: { family: 'DM Sans', size: 11 }, callback: v => Number(v).toLocaleString() }, grid: { color: 'rgba(26,46,30,0.4)' }}
+    }
+  };
+
+  chartInstance = new Chart(ctx, config);
+}
+
+// ── CHART TYPE TOGGLE ──
+function updateTypeButtons(activeType) {
+  document.querySelectorAll('.type-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.type === activeType);
+  });
+}
+
+document.querySelectorAll('.type-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!currentData) return;
+    const newType = btn.dataset.type;
+    currentData.type = newType;
+    renderChart(newType, currentData.rows, currentData.prompt);
+  });
+});
+
+// ── DOWNLOAD PNG ──
+downloadBtn.addEventListener('click', () => {
+  if (!chartInstance) return;
+  const canvas = document.getElementById('myChart');
+  // Draw on white background for PNG
+  const offscreen = document.createElement('canvas');
+  offscreen.width  = canvas.width;
+  offscreen.height = canvas.height;
+  const offCtx = offscreen.getContext('2d');
+  offCtx.fillStyle = '#080c0a';
+  offCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+  offCtx.drawImage(canvas, 0, 0);
+  const link = document.createElement('a');
+  link.download = 'chart.png';
+  link.href = offscreen.toDataURL('image/png');
+  link.click();
+});
+
+// ── CHAT MESSAGES ──
+function addChatMsg(role, text, sql, chartData) {
+  chatEmpty.style.display = 'none';
+  const msg = document.createElement('div');
+  msg.className = `chat-msg ${role}`;
+
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const meta = document.createElement('div');
+  meta.className   = 'meta';
+  meta.textContent = time;
+
+  const bubble = document.createElement('div');
+  bubble.className   = 'bubble';
+  bubble.textContent = text;
+
+  if (role === 'user') {
+    // Click to reload chart
+    bubble.addEventListener('click', () => {
+      if (bubble._chartData) {
+        const d = bubble._chartData;
+        lastSQL = d.sql;
+        renderChart(d.type, d.rows, d.prompt);
+        setActiveBubble(bubble);
+      }
+    });
+    msg.appendChild(bubble);
+    msg.appendChild(meta);
+  } else {
+    msg.appendChild(meta);
+    msg.appendChild(bubble);
+    if (sql) {
+      const toggle = document.createElement('span');
+      toggle.className   = 'sql-toggle';
+      toggle.textContent = '{ } View SQL';
+      const block = document.createElement('div');
+      block.className   = 'sql-block';
+      block.textContent = sql;
+      toggle.addEventListener('click', () => {
+        const open = block.style.display === 'block';
+        block.style.display = open ? 'none' : 'block';
+        toggle.textContent  = open ? '{ } View SQL' : '{ } Hide SQL';
+      });
+      msg.appendChild(toggle);
+      msg.appendChild(block);
+    }
+  }
+
+  chatHistory.appendChild(msg);
+  chatHistory.scrollTop = chatHistory.scrollHeight;
+  return bubble; // return bubble so we can attach _chartData later
+}
+
+function setActiveBubble(bubble) {
+  if (activeUserBubble) activeUserBubble.classList.remove('active-chart');
+  activeUserBubble = bubble;
+  if (bubble) bubble.classList.add('active-chart');
+}
+
+// ── HELPERS ──
+function setLoading(show, text = 'PROCESSING...') {
+  if (show) { loadingText.textContent = text; loadingOverlay.classList.add('show'); }
+  else { loadingOverlay.classList.remove('show'); }
+}
+function setStatus(active, label) {
+  statusDot.className  = 'status-dot' + (active ? ' active' : '');
+  statusText.textContent = label;
+}
+function showToast(msg) {
+  toast.textContent = '⚠ ' + msg;
+  toast.style.display = 'block';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.display = 'none'; }, 5000);
+}
+promptInput.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+});
+</script>
+</body>
+</html>
