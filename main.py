@@ -4,10 +4,12 @@ import os
 import re
 import sqlite3
 import uuid
+from typing import Any
 
 from dotenv import load_dotenv
-load_dotenv()
-from typing import Any
+from pathlib import Path
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -123,22 +125,23 @@ def _build_sql_prompt(user_prompt: str, session: dict[str, Any]) -> str:
     columns_list = "\n".join([f'- "{c}"' for c in session["columns"]])
     return (
         f"You are a SQLite expert. The table is called `data`.\n\n"
-        f"EXACT column names (use these exactly with double quotes):\n"
+        f"EXACT column names (use with double quotes):\n"
         f"{columns_list}\n\n"
         f"Sample text values:\n{sample_values}\n\n"
-        f"STRICT rules — follow ALL:\n"
-        f"1. Wrap EVERY column name in double quotes: \"fuelType\", \"model\", \"price\"\n"
+        f"STRICT rules:\n"
+        f"1. Wrap EVERY column name in double quotes: \"fuelType\", \"model\"\n"
         f"2. Always TRIM() text columns: TRIM(\"model\")\n"
-        f"3. Always use GROUP BY with aggregate functions (COUNT, AVG, SUM)\n"
-        f"4. Always ROUND decimal results: ROUND(AVG(\"price\"), 0)\n"
-        f"5. Always ORDER BY the numeric column DESC\n"
-        f"6. Always end with LIMIT 20\n"
-        f"7. NEVER use LIMIT 1\n"
-        f"8. NEVER use SELECT *\n"
-        f"9. Always return exactly 2 columns: one label + one value\n"
-        f"10. COUNT example: SELECT TRIM(\"fuelType\") as fuel_type, COUNT(*) as total_cars FROM data GROUP BY TRIM(\"fuelType\") ORDER BY total_cars DESC LIMIT 20\n\n"
+        f"3. Always GROUP BY with aggregate functions (COUNT, AVG, SUM)\n"
+        f"4. Always ROUND decimals: ROUND(AVG(\"price\"), 0)\n"
+        f"5. For time/year/month data: ORDER BY year ASC or month number ASC (chronological order)\n"
+        f"   For rankings/comparisons: ORDER BY value DESC\n"
+        f"   For months use: ORDER BY CASE \"month\" WHEN 'January' THEN 1 WHEN 'February' THEN 2 WHEN 'March' THEN 3 WHEN 'April' THEN 4 WHEN 'May' THEN 5 WHEN 'June' THEN 6 WHEN 'July' THEN 7 WHEN 'August' THEN 8 WHEN 'September' THEN 9 WHEN 'October' THEN 10 WHEN 'November' THEN 11 WHEN 'December' THEN 12 END ASC\n"
+        f"6. Always LIMIT 20\n"
+        f"7. NEVER use LIMIT 1 or SELECT *\n"
+        f"8. Always return exactly 2 columns: one label + one value\n"
+        f"9. COUNT example: SELECT TRIM(\"fuelType\") as fuel_type, COUNT(*) as total_cars FROM data GROUP BY TRIM(\"fuelType\") ORDER BY total_cars DESC LIMIT 20\n\n"
         f"Write ONE SQLite SELECT query for: {user_prompt}\n"
-        f"Return ONLY the SQL. No explanation. No markdown backticks."
+        f"Return ONLY the SQL. No explanation. No markdown."
     )
 
 def _build_followup_sql_prompt(followup_prompt: str, previous_query: str, session: dict[str, Any]) -> str:
@@ -152,15 +155,63 @@ def _build_followup_sql_prompt(followup_prompt: str, previous_query: str, sessio
         f"STRICT rules:\n"
         f"1. Wrap EVERY column name in double quotes\n"
         f"2. Always TRIM() text columns\n"
-        f"3. Always GROUP BY with aggregate functions\n"
-        f"4. Always ROUND decimal results\n"
-        f"5. Always ORDER BY value DESC\n"
-        f"6. Always LIMIT 20 — NEVER LIMIT 1\n"
-        f"7. Always return exactly 2 columns: one label + one value\n\n"
-        f"Previous SQL query:\n{previous_query}\n\n"
-        f"Modify it based on: {followup_prompt}\n"
-        f"Return ONLY the new SQL. No explanation. No markdown backticks."
+        f"3. Always GROUP BY with aggregates\n"
+        f"4. Always ROUND decimals\n"
+        f"5. For time/year/month data: ORDER BY year ASC or month number ASC (chronological order)\n"
+        f"   For rankings/comparisons: ORDER BY value DESC\n"
+        f"   For months use: ORDER BY CASE \"month\" WHEN 'January' THEN 1 WHEN 'February' THEN 2 WHEN 'March' THEN 3 WHEN 'April' THEN 4 WHEN 'May' THEN 5 WHEN 'June' THEN 6 WHEN 'July' THEN 7 WHEN 'August' THEN 8 WHEN 'September' THEN 9 WHEN 'October' THEN 10 WHEN 'November' THEN 11 WHEN 'December' THEN 12 END ASC\n"
+        f"6. Always return exactly 2 columns: one label + one value\n\n"
+        f"Previous SQL:\n{previous_query}\n\n"
+        f"Modify based on: {followup_prompt}\n"
+        f"Return ONLY the SQL. No explanation. No markdown."
     )
+
+def _generate_summary(prompt: str, data: list[dict], chart_type: str) -> str:
+    try:
+        keys = list(data[0].keys()) if data else []
+        sample = data[:5]
+        summary_prompt = (
+            f"User asked: '{prompt}'\n"
+            f"Chart type: {chart_type}\n"
+            f"Data columns: {keys}\n"
+            f"Top rows: {sample}\n"
+            f"Total rows: {len(data)}\n\n"
+            f"Write ONE short insight sentence (max 15 words) about the most interesting finding in this data.\n"
+            f"Example: 'Diesel cars are most common, making up 45% of the fleet.'\n"
+            f"Return ONLY the sentence. No explanation."
+        )
+        summary = call_llm(summary_prompt).strip()
+        summary = summary.strip('"').strip("'")
+        return summary
+    except Exception:
+        return ""
+
+def _generate_suggested_queries(columns: list[str], sample_values: str) -> list[str]:
+    try:
+        prompt = (
+            f"A user uploaded a CSV with these columns: {', '.join(columns)}\n\n"
+            f"Generate exactly 4 short natural language queries that:\n"
+            f"1. Work with GROUP BY aggregations (COUNT, AVG, SUM)\n"
+            f"2. Show trends, comparisons, or distributions\n"
+            f"3. Are generic enough to always return multiple rows\n"
+            f"4. Avoid specific values like store names, IDs, or exact dates\n\n"
+            f"Good examples:\n"
+            f"- Show total quantity sold by product\n"
+            f"- Show average price by category\n"
+            f"- Show monthly sales trend\n"
+            f"- Compare sales across different regions\n\n"
+            f"Format: Return only 4 lines, one query per line. No numbers, bullets, or explanation."
+        )
+        result = call_llm(prompt).strip()
+        queries = [q.strip().lstrip('•-0123456789). ') for q in result.split('\n') if q.strip()]
+        return queries[:4]
+    except Exception:
+        return [
+            f"Show total count by {columns[0] if columns else 'category'}",
+            f"Show average {columns[2] if len(columns) > 2 else 'value'} by {columns[0] if columns else 'group'}",
+            f"Show top 10 by {columns[2] if len(columns) > 2 else 'value'}",
+            f"Show distribution of {columns[1] if len(columns) > 1 else 'items'}",
+        ]
 
 class QueryRequest(BaseModel):
     session_id: str = Field(..., description="Session ID from upload")
@@ -218,8 +269,17 @@ async def upload_csv(file: UploadFile = File(...)):
     conn.commit()
     session_id      = str(uuid.uuid4())
     columns_from_db = [r[1] for r in conn.execute(f"PRAGMA table_info({TABLE_NAME})").fetchall()]
-    sessions[session_id] = {"conn": conn, "columns": columns_from_db}
-    return {"session_id": session_id, "columns": columns_from_db}
+    session_data    = {"conn": conn, "columns": columns_from_db}
+    sessions[session_id] = session_data
+
+    sample_values = _get_sample_values(session_data)
+    suggested = _generate_suggested_queries(columns_from_db, sample_values)
+
+    return {
+        "session_id": session_id,
+        "columns": columns_from_db,
+        "suggested_queries": suggested
+    }
 
 @app.get("/api/schema/{session_id}")
 async def get_schema(session_id: str):
@@ -258,7 +318,7 @@ async def query(request: QueryRequest):
     chart_prompt = (
         f"User asked: {request.prompt}\n"
         f"Data has {len(data)} rows with columns: {list(data[0].keys())}\n"
-        f"Rules: 'line' for year/time trends, 'pie' for parts-of-whole with fewer than 8 items, "
+        f"Rules: 'line' for year/time trends, 'pie' for parts-of-whole under 8 items, "
         f"'bar' for comparisons, 'scatter' for correlations.\n"
         f"Reply with ONE word only: bar, line, pie, or scatter"
     )
@@ -273,7 +333,14 @@ async def query(request: QueryRequest):
     except Exception:
         chart_type = "bar"
 
-    return {"data": data, "chart_type": chart_type, "query_used": sql}
+    summary = _generate_summary(request.prompt, data, chart_type)
+
+    return {
+        "data": data,
+        "chart_type": chart_type,
+        "query_used": sql,
+        "summary": summary
+    }
 
 @app.post("/api/followup")
 async def followup(request: FollowupRequest):
@@ -305,7 +372,7 @@ async def followup(request: FollowupRequest):
     chart_prompt = (
         f"User asked: {request.followup_prompt}\n"
         f"Data has {len(data)} rows with columns: {list(data[0].keys())}\n"
-        f"Rules: 'line' for year/time trends, 'pie' for parts-of-whole with fewer than 8 items, "
+        f"Rules: 'line' for year/time trends, 'pie' for parts-of-whole under 8 items, "
         f"'bar' for comparisons, 'scatter' for correlations.\n"
         f"Reply with ONE word only: bar, line, pie, or scatter"
     )
@@ -320,7 +387,14 @@ async def followup(request: FollowupRequest):
     except Exception:
         chart_type = "bar"
 
-    return {"data": data, "chart_type": chart_type, "query_used": sql}
+    summary = _generate_summary(request.followup_prompt, data, chart_type)
+
+    return {
+        "data": data,
+        "chart_type": chart_type,
+        "query_used": sql,
+        "summary": summary
+    }
 
 @app.get("/")
 async def root():
